@@ -14,7 +14,7 @@ def create_window(window_size, channel):
     window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
     return window
 
-def _ssim(img1, img2, window, window_size, channel, size_average = True):
+def _ssim(img1, img2, window, window_size, channel, L=1, reduction='mean'):
     mu1 = F.conv2d(img1, window, padding = window_size//2, groups = channel)
     mu2 = F.conv2d(img2, window, padding = window_size//2, groups = channel)
 
@@ -26,23 +26,27 @@ def _ssim(img1, img2, window, window_size, channel, size_average = True):
     sigma2_sq = F.conv2d(img2*img2, window, padding = window_size//2, groups = channel) - mu2_sq
     sigma12 = F.conv2d(img1*img2, window, padding = window_size//2, groups = channel) - mu1_mu2
 
-    C1 = 0.01**2
-    C2 = 0.03**2
+    C1 = (0.01 * L)**2
+    C2 = (0.03 * L)**2
 
     ssim_map = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
-
-    if size_average:
+    
+    if reduction == 'mean':
         return ssim_map.mean()
-    else:
-        return ssim_map.mean(1).mean(1).mean(1)
+    elif reduction == 'sum':
+        return ssim_map.sum()
+    elif reduction == 'none':
+        return ssim_map
+    raise ValueError(reduction + " is not a valid value for reduction")
 
 class SSIM(torch.nn.Module):
-    def __init__(self, window_size = 11, size_average = True):
+    def __init__(self, window_size = 11, L=1, reduction='mean'):
         super(SSIM, self).__init__()
         self.window_size = window_size
-        self.size_average = size_average
         self.channel = 1
         self.window = create_window(window_size, self.channel)
+        self.L = L
+        self.reduction = reduction
 
     def forward(self, img1, img2):
         (_, channel, _, _) = img1.size()
@@ -59,15 +63,13 @@ class SSIM(torch.nn.Module):
             self.window = window
             self.channel = channel
 
+        return _ssim(img1, img2, window, self.window_size, channel, L=self.L, reduction=self.reduction)
 
-        return _ssim(img1, img2, window, self.window_size, channel, self.size_average)
-
-def ssim(img1, img2, window_size = 11, size_average = True):
+def ssim(img1, img2, window_size = 11, L=1, reduction='mean'):
     (_, channel, _, _) = img1.size()
     window = create_window(window_size, channel)
     
     if img1.is_cuda:
         window = window.cuda(img1.get_device())
     window = window.type_as(img1)
-    
-    return _ssim(img1, img2, window, window_size, channel, size_average)
+    return _ssim(img1, img2, window, window_size, channel, L=L, reduction=reduction)
